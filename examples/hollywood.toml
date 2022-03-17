@@ -1,0 +1,39 @@
+[[system]]
+name = "examples"
+nats_uri = "nats://127.0.0.1:14222"
+
+[[actor]]
+name = "ActorX"
+
+[actor.dev]
+bin = "actor-x"
+path = "actor-x"
+env = ["RUST_LOG=info"]
+watch = ["types", "../hollywood"]
+
+[[actor]]
+name = "ActorY"
+
+[actor.dev]
+bin = "actor-y"
+path = "actor-y"
+env = ["RUST_LOG=debug"]
+watch = ["types", "../hollywood"]
+
+[[actor]]
+name = "ActorZ"
+
+[actor.dev]
+bin = "actor-z"
+path = "actor-z"
+env = ["RUST_LOG=debug"]
+watch = ["types", "../hollywood"]
+
+[[actor]]
+name = "ActorZZ"
+
+[actor.dev]
+bin = "actor-zz"
+path = "actor-zz"
+env = ["RUST_LOG=debug"]
+watch = ["types", "../hollywood"]

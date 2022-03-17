@@ -1,0 +1,14 @@
+[workspace]
+
+members = [
+    "examples/playground",
+    "examples/actor-x",
+    "examples/actor-y",
+    "examples/actor-z",
+    "examples/actor-zz",
+    "examples/test-client",
+    "examples/types",
+    "hollywood",
+    "hollywood-cli",
+    "hollywood-macro",
+]

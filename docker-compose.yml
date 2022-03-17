@@ -1,0 +1,76 @@
+version: "3.7"
+services:
+  nats1:
+    image: nats
+    ports:
+      - "14222:4222"
+      - "18222:8222"
+    # networks: ["nats"]
+  nats2:
+    image: nats
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://ruser:T0pS3cr3t@nats1:6222"
+    # networks: ["nats"]
+    depends_on: ["nats1"]
+  nats3:
+    image: nats
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://ruser:T0pS3cr3t@nats1:6222"
+    # networks: ["nats"]
+    depends_on: ["nats1"]
+  redis:
+    image: redis:6.2-alpine
+    restart: always
+    ports:
+      - '6379:6379'
+    command: redis-server --save 20 1 --loglevel warning
+    volumes:
+      - redis:/data
+
+volumes:
+  redis:
+    driver: local
+
+  # etcd1:
+  #   image: docker.io/bitnami/etcd:3
+  #   ports:
+  #     - "12379:2379"
+  #   environment:
+  #     - ALLOW_NONE_AUTHENTICATION=yes
+  #     - ETCD_NAME=etcd1
+  #     - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd1:2380
+  #     - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+  #     - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+  #     - ETCD_ADVERTISE_CLIENT_URLS=http://etcd1:2379
+  #     - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+  #     - ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+  #     - ETCD_INITIAL_CLUSTER_STATE=new
+  # etcd2:
+  #   image: docker.io/bitnami/etcd:3
+  #   ports:
+  #     - "22379:2379"
+  #   environment:
+  #     - ALLOW_NONE_AUTHENTICATION=yes
+  #     - ETCD_NAME=etcd2
+  #     - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd2:2380
+  #     - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+  #     - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+  #     - ETCD_ADVERTISE_CLIENT_URLS=http://etcd2:2379
+  #     - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+  #     - ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+  #     - ETCD_INITIAL_CLUSTER_STATE=new
+  # etcd3:
+  #   image: docker.io/bitnami/etcd:3
+  #   ports:
+  #     - "32379:2379"
+  #   environment:
+  #     - ALLOW_NONE_AUTHENTICATION=yes
+  #     - ETCD_NAME=etcd3
+  #     - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd3:2380
+  #     - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+  #     - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+  #     - ETCD_ADVERTISE_CLIENT_URLS=http://etcd3:2379
+  #     - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+  #     - ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+  #     - ETCD_INITIAL_CLUSTER_STATE=new
+# networks:
+#   nats:
+#     name: nats
