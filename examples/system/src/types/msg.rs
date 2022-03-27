@@ -1,7 +1,13 @@
+use hollywood::Msg;
 use serde::{Deserialize, Serialize};
 
-// ActorX
-pub static ACTOR_X: &'static str = "ActorX";
+use crate::types::version;
+
+// // ActorZ
+// pub static ACTOR_Z: &'static str = "ActorZ";
+// // ActorZZ
+// pub static ACTOR_ZZ: &'static str = "ActorZZ";
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum ActorXMsg {
@@ -10,9 +16,11 @@ pub enum ActorXMsg {
     SomeSend,
     Sleep { secs: u64 },
 }
+impl Msg for ActorXMsg {
+    type Type = Self;
+    const VERSION: &'static str = version::V1_0;
+}
 
-// ActorY
-pub static ACTOR_Y: &'static str = "ActorY";
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum ActorYMsg {
@@ -20,11 +28,10 @@ pub enum ActorYMsg {
     PingResponse { timestamp: String },
     SomeSend,
 }
-
-// ActorZ
-pub static ACTOR_Z: &'static str = "ActorZ";
-// ActorZZ
-pub static ACTOR_ZZ: &'static str = "ActorZZ";
+impl Msg for ActorYMsg {
+    type Type = Self;
+    const VERSION: &'static str = version::V1_0;
+}
 
 // Pubsub Msg & Subjects
 pub static PUBSUB_SUBJECT_ONE: &'static str = "subject-one";
@@ -32,4 +39,8 @@ pub static PUBSUB_SUBJECT_ONE: &'static str = "subject-one";
 #[serde(tag = "type")]
 pub enum SubjectOneMsg {
     Event,
+}
+impl Msg for SubjectOneMsg {
+    type Type = Self;
+    const VERSION: &'static str = version::V1_0;
 }

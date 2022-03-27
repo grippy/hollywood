@@ -1,13 +1,27 @@
 mod actor;
+mod broker;
 mod client;
 mod common;
 
 /// Types for defining and running Actors.
-pub use actor::{run, Actor, RunOpts, SubscribeType};
+pub use actor::{
+    run, Actor, ActorMailbox, Dispatch, DispatchResponse, DispatchType, Handle, Msg, RunOpts,
+    SubscribeType,
+};
+
+pub mod prelude {
+    pub mod actor {
+        #[allow(unused_imports)]
+        pub use super::super::{
+            async_trait, run, Actor, Dispatch, DispatchResponse, DispatchType, Handle, Msg, Result,
+            SubscribeType,
+        };
+    }
+}
 
 /// Hollywood Client. Use this if you need to
 /// implement actor-to-actor communication.
-pub use client::Client;
+pub use client::{mailbox, Client};
 
 // Hollywood Config related things...
 pub mod config;

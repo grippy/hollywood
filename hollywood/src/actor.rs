@@ -1,12 +1,18 @@
+use crate::broker::Broker;
+use crate::client;
+use crate::common;
 use crate::env::{hollywood_system, hollywood_system_nats_uri};
 use anyhow::Result;
 use async_channel;
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use nats::asynk::Connection;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
+
+#[allow(non_upper_case_globals)]
+pub const VERSION_v1_0: &'static str = "v1.0";
 
 /// Mailbox trait defines a common interface for
 /// for sending and receiving messages.
@@ -31,14 +37,16 @@ pub(crate) fn mailbox_name(system_name: &String, actor_name: &String) -> String 
 pub(crate) struct HollywoodRequest {
     pub id: String,
     pub msg: Vec<u8>,
+    pub msg_version: String,
 }
 
 /// Message type for returning an Actor response.
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct HollywoodResponse {
+    pub error: Option<String>,
     pub id: String,
     pub msg: Option<Vec<u8>>,
-    pub error: Option<String>,
+    pub msg_version: String,
 }
 
 /// Message type that sends a nats message
@@ -47,6 +55,7 @@ pub(crate) struct HollywoodResponse {
 pub(crate) struct HollywoodSend {
     pub id: String,
     pub msg: Vec<u8>,
+    pub msg_version: String,
 }
 
 /// Message type that delivers a pubsub message
@@ -54,6 +63,7 @@ pub(crate) struct HollywoodSend {
 pub(crate) struct HollywoodPublish {
     pub id: String,
     pub msg: Vec<u8>,
+    pub msg_version: String,
 }
 
 /// Main message wrapper type for all messages
@@ -67,78 +77,47 @@ pub(crate) enum HollywoodMsg {
     Publish(HollywoodPublish),
 }
 
+impl Msg for HollywoodMsg {
+    type Type = Self;
+    const VERSION: &'static str = VERSION_v1_0;
+}
+
 // Do we need this message type?
 // or at the least, can we make them...
 // Request(HollywoodRequest, reply_id: String)
 // Send(HollywoodSend)
 // etc...
-enum ActorMailboxMsg {
-    Request {
-        id: String,
-        msg: Vec<u8>,
-        reply_id: String,
-    },
-    Send {
-        id: String,
-        msg: Vec<u8>,
-    },
-    Subscribe {
-        id: String,
-        msg: Vec<u8>,
-    },
+pub(crate) struct ActorRequest {
+    pub id: String,
+    pub msg_version: String,
+    pub msg: Vec<u8>,
+    pub reply_id: String,
+}
+
+pub(crate) struct ActorSend {
+    pub id: String,
+    pub msg_version: String,
+    pub msg: Vec<u8>,
+}
+
+pub(crate) struct ActorSubscribe {
+    pub id: String,
+    pub msg_version: String,
+    pub msg: Vec<u8>,
+}
+
+pub(crate) enum ActorMsg {
+    Request(ActorRequest),
+    Send(ActorSend),
+    Subscribe(ActorSubscribe),
     #[allow(dead_code)]
     Health,
     #[allow(dead_code)]
     Shutdown,
 }
 
-/// ActorMailbox stores messages received by the Agent broker
-struct ActorMailbox {
-    name: String,
-    max_size: Option<u32>,
-    sender: async_channel::Sender<ActorMailboxMsg>,
-    receiver: async_channel::Receiver<ActorMailboxMsg>,
-    nats: Connection,
-}
-
-impl ActorMailbox {
-    fn new(name: String, max_size: Option<u32>, nats: Connection) -> Self {
-        let (tx, rx) = async_channel::unbounded();
-        ActorMailbox {
-            name: name,
-            max_size,
-            sender: tx,
-            receiver: rx,
-            nats: nats,
-        }
-    }
-}
-
-/// Actor mailbox implementation
-///
-/// The agent broker messages from the actor nats
-/// queue into this data structure. From here,
-/// messages are received and handled by
-/// an actor.
-#[async_trait]
-impl Mailbox for ActorMailbox {
-    type Msg = ActorMailboxMsg;
-
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    fn sender(&self) -> async_channel::Sender<Self::Msg> {
-        self.sender.clone()
-    }
-
-    async fn recv(&mut self) -> Result<Self::Msg> {
-        match self.receiver.recv().await {
-            Ok(msg) => Ok(msg),
-            Err(err) => Err(err.into()),
-        }
-    }
-}
+pub(crate) type ActorSender = async_channel::Sender<ActorMsg>;
+pub(crate) type ActorReceiver = async_channel::Receiver<ActorMsg>;
 
 #[derive(Clone)]
 pub enum SubscribeType {
@@ -155,77 +134,324 @@ pub enum SubscribeType {
     Publish { subject: &'static str },
 }
 
+pub trait Msg
+where
+    Self: Sized + Serialize + DeserializeOwned,
+{
+    type Type;
+    const VERSION: &'static str;
+    fn name() -> &'static str {
+        std::any::type_name::<&Self>()
+            .split("::")
+            .collect::<Vec<_>>()
+            .last()
+            .unwrap()
+    }
+    fn version() -> &'static str {
+        Self::VERSION
+    }
+
+    fn dispatch_type() -> String {
+        format!("{}/{}", Self::name(), Self::version())
+    }
+
+    fn into_bytes(&self) -> Result<Vec<u8>> {
+        Ok(common::serialize(&self)?)
+    }
+
+    fn from_bytes(msg: &Vec<u8>) -> Result<Self> {
+        Ok(common::deserialize::<Self>(msg)?)
+    }
+}
+
+#[derive(Debug)]
+pub enum DispatchType {
+    Send,
+    Request,
+    Subscribe,
+}
+
+// DispatchResponse: (message version, message)
+pub type DispatchResponse = (Option<&'static str>, Option<Vec<u8>>);
+
+#[async_trait]
+pub trait Dispatch {
+    // This is used to configure which actor mailbox
+    // version we should use...
+    fn instance_dispatch_types(&self) -> Vec<String>;
+    fn dispatch_types() -> Vec<String>;
+
+    // `dispatch` a message to an actor
+    async fn dispatch(
+        &mut self,
+        version: String,
+        dispatch_type: &DispatchType,
+        bytes: &Vec<u8>,
+    ) -> Result<DispatchResponse>;
+}
+
+#[async_trait]
+pub trait ActorMailbox
+where
+    Self: Actor,
+{
+    async fn mailbox<M: Msg>(
+        system_name: String,
+        nats_uri: String,
+    ) -> Result<client::mailbox::Mailbox>;
+    async fn mailbox_from_env<M: Msg>() -> Result<client::mailbox::Mailbox>;
+}
+
 /// Actor trait for defining an expected message
 /// type and how to handle request/send type requests.
 #[async_trait]
 pub trait Actor {
-    /// The mailbox message type..
-    /// This should be serializable to/from Vec<u8>
-    type Msg: Serialize + DeserializeOwned;
+    const VERSION: &'static str;
 
-    // The name of an actor
-    fn name(&self) -> &'static str;
+    fn version() -> &'static str {
+        Self::VERSION
+    }
+
+    fn type_name() -> &'static str {
+        std::any::type_name::<&Self>()
+            .split("::")
+            .collect::<Vec<_>>()
+            .last()
+            .unwrap()
+    }
+
+    fn type_name_version(&self) -> String {
+        format!("{}/{}", Self::type_name(), Self::version())
+    }
 
     // How we expect to run this actor..
     // If unimplemented, the default is `SubscribeType::Queue`
-    fn subscribe_type(&self) -> SubscribeType {
+    fn instance_subscribe_type(&self) -> SubscribeType {
+        Self::subscribe_type()
+    }
+
+    fn subscribe_type() -> SubscribeType {
         SubscribeType::Queue
     }
-    // Implement this to handle serializing outbound
+}
 
-    // response message. The default serialization type
-    // is serde_json
-    fn serialize(&self, msg: &Self::Msg) -> Result<Vec<u8>>
-    where
-        Self::Msg: Serialize,
-    {
-        match serde_json::to_vec(msg) {
-            Ok(msg) => Ok(msg),
-            Err(err) => Err(err.into()),
-        }
-    }
-    /// Implement this to handle deserializing inbound
-    /// request/send messages
-    fn deserialize<'a>(&self, msg: &'a Vec<u8>) -> Result<Self::Msg>
-    where
-        Self::Msg: Deserialize<'a>,
-    {
-        match serde_json::from_slice(msg) {
-            Ok(msg) => Ok(msg),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    // // TBD: we might not need this for now
-    // async fn initialize(&mut self) -> Result<()>;
-    /// Implement this for handling `request` type messages.
-    async fn request(&mut self, msg: Self::Msg) -> Result<Option<Self::Msg>>;
-    /// Implement this for handling `send` type messages.
+#[async_trait]
+pub trait Handle<M>
+where
+    Self: Actor,
+    M: Msg,
+{
+    type Msg;
     async fn send(&mut self, msg: Self::Msg) -> Result<()>;
-    /// Implement this for handling `subscribe` type messages.
+    async fn request(&mut self, msg: Self::Msg) -> Result<Option<Self::Msg>>;
     async fn subscribe(&mut self, msg: Self::Msg) -> Result<()>;
 }
 
-/// Agent is responsible for processing
-/// actor mailbox messages and passing them
-/// to an actor.
-struct Agent<A: Actor> {
-    mailbox: ActorMailbox,
+// struct Broker {
+//     actor_name: String,
+//     mailbox_names: Vec<String>,
+//     mailbox_sender: ActorSender,
+//     mailbox_max_size: Option<u32>,
+//     nats: Connection,
+//     subscribe_type: SubscribeType,
+// }
+
+// impl Broker {
+//     fn new(
+//         actor_name: String,
+//         mailbox_names: Vec<String>,
+//         mailbox_sender: ActorSender,
+//         mailbox_max_size: Option<u32>,
+//         nats: Connection,
+//         subscribe_type: SubscribeType,
+//     ) -> Self {
+//         Self {
+//             actor_name: actor_name,
+//             mailbox_names: mailbox_names,
+//             mailbox_sender: mailbox_sender,
+//             mailbox_max_size: mailbox_max_size,
+//             nats: nats,
+//             subscribe_type: subscribe_type,
+//         }
+//     }
+
+//     async fn spawn(
+//         actor_name: String,
+//         mailbox_max_size: Option<u32>,
+//         mailbox_name: String,
+//         mailbox_sender: ActorSender,
+//         nats: Connection,
+//         subscribe_type: SubscribeType,
+//     ) -> Result<()> {
+//         let source = match subscribe_type {
+//             SubscribeType::Queue => {
+//                 info!(
+//                     "{} agent subscribing to queue subject {:?}",
+//                     &actor_name, &mailbox_name
+//                 );
+//                 nats
+//                     // use the mailbox name as the group
+//                     .queue_subscribe(&mailbox_name, &mailbox_name)
+//                     .await?
+//             }
+//             SubscribeType::Publish { subject } => {
+//                 info!(
+//                     "{} agent subscribing to pubsub subject {:?}",
+//                     &actor_name, &subject
+//                 );
+//                 nats.subscribe(&subject).await?
+//             }
+//         };
+
+//         let max_size = if mailbox_max_size.is_some() {
+//             mailbox_max_size.unwrap()
+//         } else {
+//             0
+//         };
+//         let mut backoff = 0;
+//         loop {
+//             // slow down how fast we read nats messages
+//             // if mailbox is full
+//             loop {
+//                 if max_size > 0 && mailbox_sender.len() > max_size as usize {
+//                     sleep(Duration::from_millis(100)).await;
+//                 } else {
+//                     break;
+//                 }
+//             }
+
+//             if let Some(nats_msg) = source.try_next() {
+//                 // deserialize nats_msg.data here
+//                 let hollywood_msg: HollywoodMsg = match serde_json::from_slice(&nats_msg.data) {
+//                     Ok(msg) => msg,
+//                     Err(err) => {
+//                         error!("deserializing nats msg to HollywoodMsg: {:?}", &err);
+//                         continue;
+//                     }
+//                 };
+
+//                 // We should only have request/send here
+//                 // HollywoodMsg::Response type is only
+//                 let (msg_id, msg_version, msg) = match hollywood_msg {
+//                     HollywoodMsg::Request(resp) => (resp.id, resp.msg_version, resp.msg),
+//                     HollywoodMsg::Send(send) => (send.id, send.msg_version, send.msg),
+//                     HollywoodMsg::Publish(publish) => {
+//                         (publish.id, publish.msg_version, publish.msg)
+//                     }
+//                     _ => {
+//                         todo!("HollywoodMsg: not yet implemented");
+//                     }
+//                 };
+
+//                 // create ActorMsg.. if nats msg
+//                 // has a reply handle then send a nats request
+//                 // so we can route the response back to the caller
+//                 let msg = if nats_msg.reply.is_some() {
+//                     ActorMsg::Request(ActorRequest {
+//                         id: msg_id,
+//                         msg: msg,
+//                         msg_version: msg_version,
+//                         reply_id: nats_msg.reply.unwrap(),
+//                     })
+//                 } else {
+//                     // send-type: queue or pubsub?
+//                     match subscribe_type {
+//                         SubscribeType::Queue => ActorMsg::Send(ActorSend {
+//                             id: msg_id,
+//                             msg: msg,
+//                             msg_version: msg_version,
+//                         }),
+//                         _ => ActorMsg::Subscribe(ActorSubscribe {
+//                             id: msg_id,
+//                             msg: msg,
+//                             msg_version: msg_version,
+//                         }),
+//                     }
+//                 };
+
+//                 // send to mailbox
+//                 match mailbox_sender.send(msg).await {
+//                     Ok(_) => {}
+//                     Err(err) => {
+//                         warn!("failed to forward msg to actor mailbox: {:?}", &err);
+//                     }
+//                 }
+//                 backoff = 0;
+//             } else {
+//                 // backoff max is 1sec
+//                 backoff = std::cmp::min(backoff + 10, 1000);
+//             }
+
+//             if backoff > 0 {
+//                 sleep(Duration::from_millis(backoff)).await;
+//             }
+//         }
+//         // Ok(())
+//     }
+
+//     async fn run(&self) -> Result<()> {
+//         // spawn broker for each mailbox
+//         for mailbox_name in &self.mailbox_names {
+//             let actor_name = self.actor_name.clone();
+//             let nats = self.nats.clone();
+//             let mailbox_name = mailbox_name.to_owned();
+//             let mailbox_sender = self.mailbox_sender.clone();
+//             let mailbox_max_size = self.mailbox_max_size.clone();
+//             let subscribe_type = self.subscribe_type.clone();
+//             tokio::spawn(async move {
+//                 Broker::spawn(
+//                     actor_name,
+//                     mailbox_max_size,
+//                     mailbox_name,
+//                     mailbox_sender,
+//                     nats,
+//                     subscribe_type,
+//                 )
+//                 .await
+//             });
+//         }
+//         Ok(())
+//     }
+// }
+
+/// Agent
+struct Agent<A: Actor + Dispatch> {
+    system_name: String,
     actor: A,
+    max_size: Option<u32>,
+    sender: ActorSender,
+    receiver: ActorReceiver,
+    nats: Connection,
 }
 
-impl<A: Actor> Agent<A> {
-    fn new(mailbox: ActorMailbox, actor: A) -> Self {
+impl<A: Actor + Dispatch> Agent<A> {
+    fn new(system_name: String, actor: A, max_size: Option<u32>, nats: Connection) -> Self {
+        let (tx, rx) = async_channel::unbounded();
         Agent {
+            system_name: system_name,
             actor: actor,
-            mailbox: mailbox,
+            max_size: max_size,
+            sender: tx,
+            receiver: rx,
+            nats: nats,
+        }
+    }
+
+    fn sender(&self) -> ActorSender {
+        self.sender.clone()
+    }
+
+    async fn recv(&mut self) -> Result<ActorMsg> {
+        match self.receiver.recv().await {
+            Ok(msg) => Ok(msg),
+            Err(err) => Err(err.into()),
         }
     }
 
     /// Publish the response to an actor request
     async fn reply(&mut self, reply_id: String, msg: HollywoodMsg) {
         match serde_json::to_vec(&msg) {
-            Ok(msg) => match self.mailbox.nats.publish(&reply_id[..], msg).await {
+            Ok(msg) => match self.nats.publish(&reply_id[..], msg).await {
                 Err(err) => {
                     error!("sending response to nats: {:?}", &err);
                 }
@@ -237,112 +463,88 @@ impl<A: Actor> Agent<A> {
         }
     }
 
-    async fn handle_mailbox_msg(&mut self, mailbox_msg: ActorMailboxMsg) {
+    async fn handle_mailbox_msg(&mut self, mailbox_msg: ActorMsg) {
         match mailbox_msg {
-            ActorMailboxMsg::Health => {
+            ActorMsg::Health => {
                 // TODO: figure out what a health check means
                 todo!("implement health check");
             }
-            ActorMailboxMsg::Shutdown => {
+            ActorMsg::Shutdown => {
                 todo!("implement shutdown");
             }
-            ActorMailboxMsg::Request { id, msg, reply_id } => {
-                self.handle_msg(id, &msg, Some(reply_id), false, false)
-                    .await;
+            ActorMsg::Request(req) => {
+                self.handle_msg(
+                    req.id,
+                    req.msg_version,
+                    &DispatchType::Request,
+                    &req.msg,
+                    Some(req.reply_id),
+                )
+                .await;
             }
-            ActorMailboxMsg::Send { id, msg } => {
-                self.handle_msg(id, &msg, None, true, false).await;
+            ActorMsg::Send(send) => {
+                self.handle_msg(
+                    send.id,
+                    send.msg_version,
+                    &DispatchType::Send,
+                    &send.msg,
+                    None,
+                )
+                .await;
             }
-            ActorMailboxMsg::Subscribe { id, msg } => {
-                self.handle_msg(id, &msg, None, false, true).await;
+            ActorMsg::Subscribe(sub) => {
+                self.handle_msg(
+                    sub.id,
+                    sub.msg_version,
+                    &DispatchType::Subscribe,
+                    &sub.msg,
+                    None,
+                )
+                .await;
             }
         }
     }
 
-    /// Wrapper for handling both send & request type messages
+    /// Wrapper for handling send/request/subscribe type messages
     async fn handle_msg(
         &mut self,
         id: String,
+        version: String,
+        dispatch_type: &DispatchType,
         msg: &Vec<u8>,
         reply_id: Option<String>,
-        send: bool,
-        subscribe: bool,
     ) {
-        match self.actor.deserialize(msg) {
-            Ok(msg) => {
-                // existence of a reply_id means we have
-                // an actor request and expect a reply
-                // that should be sent back through nats
-                if reply_id.is_some() {
-                    let reply_id = reply_id.unwrap();
-                    match self.actor.request(msg).await {
-                        Ok(resp) => {
-                            debug!("agent request msg id {} success", &id);
-                            match self.actor.serialize(&resp.unwrap()) {
-                                Ok(msg) => {
-                                    let resp = HollywoodResponse {
-                                        id: id,
-                                        msg: Some(msg),
-                                        error: None,
-                                    };
-                                    let msg = HollywoodMsg::Response(resp);
-                                    self.reply(reply_id, msg).await;
-                                }
-                                Err(err) => {
-                                    error!("agent serialize msg id {} err {:?}", &id, &err);
-                                    let resp = HollywoodResponse {
-                                        id: id,
-                                        msg: None,
-                                        error: Some(err.to_string()),
-                                    };
-                                    let msg = HollywoodMsg::Response(resp);
-                                    self.reply(reply_id, msg).await;
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            error!("agent request msg id {} err: {:?}", &id, &err);
-                            let resp = HollywoodResponse {
-                                id: id,
-                                msg: None,
-                                error: Some(err.to_string()),
-                            };
-                            let msg = HollywoodMsg::Response(resp);
-                            self.reply(reply_id, msg).await;
-                        }
-                    }
-                } else {
-                    if send {
-                        // call actor.send
-                        match self.actor.send(msg).await {
-                            Ok(_) => {}
-                            Err(err) => {
-                                error!("agent send msg id, {} err: {:?}", &id, &err);
-                            }
-                        }
-                    } else if subscribe {
-                        // call actor.subscribe
-                        match self.actor.subscribe(msg).await {
-                            Ok(_) => {}
-                            Err(err) => {
-                                error!("agent subscribe msg id, {} err: {:?}", &id, &err);
-                            }
-                        }
-                    }
-                }
-            }
-            Err(err) => {
-                error!("agent deserialize msg id {} err: {:?}", &id, &err);
-                if reply_id.is_some() {
+        let result = Dispatch::dispatch(&mut self.actor, version, &dispatch_type, msg).await;
+        let hollywood_msg = match result {
+            Ok((msg_version, msg)) => match dispatch_type {
+                DispatchType::Request => {
                     let resp = HollywoodResponse {
                         id: id,
+                        msg_version: msg_version.unwrap_or("unknown_version").to_string(),
+                        msg: msg,
+                        error: None,
+                    };
+                    HollywoodMsg::Response(resp)
+                }
+                _ => return,
+            },
+            Err(err) => match dispatch_type {
+                DispatchType::Request => {
+                    let resp = HollywoodResponse {
+                        id: id,
+                        msg_version: "".to_string(),
                         msg: None,
                         error: Some(err.to_string()),
                     };
-                    let msg = HollywoodMsg::Response(resp);
-                    self.reply(reply_id.unwrap(), msg).await;
+                    HollywoodMsg::Response(resp)
                 }
-            }
+                _ => return,
+            },
+        };
+
+        if reply_id.is_some() {
+            let reply_id = reply_id.unwrap();
+            self.reply(reply_id, hollywood_msg).await;
         }
     }
 
@@ -351,120 +553,40 @@ impl<A: Actor> Agent<A> {
     /// system and actor instance.
     async fn run(&mut self) -> Result<()> {
         // run broker here...
-        let nats = self.mailbox.nats.clone();
-        let mailbox_name = self.mailbox.name();
-        let mailbox_sender = self.mailbox.sender();
-        let mailbox_max_size = self.mailbox.max_size.clone();
-        let subscribe_type = self.actor.subscribe_type().clone();
+        let system_name = &self.system_name;
+        let actor_type_name_version = &self.actor.type_name_version();
 
-        let source = match subscribe_type {
-            SubscribeType::Queue => {
-                info!(
-                    "{} agent subscribing to queue subject {:?}",
-                    &self.actor.name(),
-                    &mailbox_name
-                );
-                nats
-                    // use the mailbox name as the group
-                    .queue_subscribe(&mailbox_name, &mailbox_name)
-                    .await?
-            }
-            SubscribeType::Publish { subject } => {
-                info!(
-                    "{} agent subscribing to pubsub subject {:?}",
-                    &self.actor.name(),
-                    &subject
-                );
-                nats.subscribe(&subject).await?
-            }
-        };
+        // prepare the broker for each mailbox
+        let mailbox_sender = self.sender();
+        let mailbox_max_size = self.max_size.clone();
+        let nats = self.nats.clone();
+        let subscribe_type = self.actor.instance_subscribe_type().clone();
+        let mailbox_names = self
+            .actor
+            .instance_dispatch_types()
+            .into_iter()
+            .map(|msg_version| {
+                let actor_name = format!("{}::{}", &actor_type_name_version, &msg_version);
+                mailbox_name(&system_name, &actor_name)
+            })
+            .collect::<Vec<_>>();
 
-        // spawn broker
-        tokio::spawn(async move {
-            let max_size = if mailbox_max_size.is_some() {
-                mailbox_max_size.unwrap()
-            } else {
-                0
-            };
-            let mut backoff = 0;
-            loop {
-                // should we slow down how fast we read nats messages
-                // if mailbox is full?
-                loop {
-                    if max_size > 0 && mailbox_sender.len() > max_size as usize {
-                        sleep(Duration::from_millis(100)).await;
-                    } else {
-                        break;
-                    }
-                }
+        // run broker...
+        let broker = Broker::new(
+            actor_type_name_version.to_owned(),
+            mailbox_names,
+            mailbox_sender,
+            mailbox_max_size,
+            nats,
+            subscribe_type,
+        );
 
-                if let Some(nats_msg) = source.try_next() {
-                    // deserialize nats_msg.data here
-                    let hollywood_msg: HollywoodMsg = match serde_json::from_slice(&nats_msg.data) {
-                        Ok(msg) => msg,
-                        Err(err) => {
-                            error!("deserializing nats msg to HollywoodMsg: {:?}", &err);
-                            continue;
-                        }
-                    };
-
-                    // We should only have request/send here
-                    // HollywoodMsg::Response type is only
-                    let (msg_id, msg) = match hollywood_msg {
-                        HollywoodMsg::Request(resp) => (resp.id, resp.msg),
-                        HollywoodMsg::Send(send) => (send.id, send.msg),
-                        HollywoodMsg::Publish(publish) => (publish.id, publish.msg),
-                        _ => {
-                            todo!("HollywoodMsg: not yet implemented");
-                        }
-                    };
-
-                    // create ActorMailboxMsg.. if nats msg
-                    // has a reply handle then we make this a request
-                    // so we can route the response back to the caller
-                    let msg = if nats_msg.reply.is_some() {
-                        ActorMailboxMsg::Request {
-                            id: msg_id,
-                            msg: msg,
-                            reply_id: nats_msg.reply.unwrap(),
-                        }
-                    } else {
-                        // send-type: queue or pubsub?
-                        match subscribe_type {
-                            SubscribeType::Queue => ActorMailboxMsg::Send {
-                                id: msg_id,
-                                msg: msg,
-                            },
-                            _ => ActorMailboxMsg::Subscribe {
-                                id: msg_id,
-                                msg: msg,
-                            },
-                        }
-                    };
-
-                    // send to mailbox
-                    match mailbox_sender.send(msg).await {
-                        Ok(_) => {}
-                        Err(err) => {
-                            warn!("failed to forward msg to actor mailbox: {:?}", &err);
-                        }
-                    }
-                    backoff = 0;
-                } else {
-                    // backoff max is 1sec
-                    backoff = std::cmp::min(backoff + 10, 1000);
-                }
-
-                if backoff > 0 {
-                    sleep(Duration::from_millis(backoff)).await;
-                }
-            }
-        });
+        let _ = broker.run().await?;
 
         // run the mailbox receiver...
         // TODO: can we make a pool of these here?
         loop {
-            if let Ok(mailbox_msg) = self.mailbox.recv().await {
+            if let Ok(mailbox_msg) = self.recv().await {
                 self.handle_mailbox_msg(mailbox_msg).await
             }
         }
@@ -474,12 +596,9 @@ impl<A: Actor> Agent<A> {
 
 /// RunOpts defines an actor instance and
 /// a set of common configuration options.
-pub struct RunOpts<A: Actor> {
+pub struct RunOpts<A: Actor + Dispatch> {
     /// The system name we want to connect too.
     system_name: String,
-    /// The actor name we want to run as. This derived
-    /// from the Actor trait `name()` method.
-    actor_name: String,
     /// The actor instance we want to run.
     actor: A,
     /// The maximum size of unprocessed messages
@@ -490,11 +609,10 @@ pub struct RunOpts<A: Actor> {
     nats_uri: String,
 }
 
-impl<A: Actor> RunOpts<A> {
+impl<A: Actor + Dispatch> RunOpts<A> {
     pub fn new(system_name: String, actor: A, nats_uri: String) -> Self {
         Self {
             system_name: system_name,
-            actor_name: actor.name().to_string(),
             actor: actor,
             actor_mailbox_max_size: None,
             nats_uri,
@@ -511,7 +629,6 @@ impl<A: Actor> RunOpts<A> {
         );
         Ok(Self {
             system_name: system_name,
-            actor_name: actor.name().to_string(),
             actor: actor,
             actor_mailbox_max_size: None,
             nats_uri,
@@ -525,7 +642,8 @@ impl<A: Actor> RunOpts<A> {
 }
 
 /// This is the public interface for running an actor.
-pub async fn run<A: Actor>(opts: RunOpts<A>) -> Result<()> {
+pub async fn run<A: Actor + Dispatch>(opts: RunOpts<A>) -> Result<()> {
+    let system_name = opts.system_name;
     let actor = opts.actor;
     let actor_mailbox_max_size = opts.actor_mailbox_max_size;
     let nats_uri = &opts.nats_uri;
@@ -537,26 +655,21 @@ pub async fn run<A: Actor>(opts: RunOpts<A>) -> Result<()> {
             Err(err) => {
                 warn!(
                     "error connecting {} agent to nats: #{:?}",
-                    &actor.name(),
+                    A::type_name(),
                     &err
                 );
                 sleep(Duration::from_millis(1000)).await;
                 result = nats::asynk::connect(&nats_uri).await;
             }
             Ok(_) => {
-                info!("{} agent connected to nats...", &actor.name());
+                info!("{} agent connected to nats...", A::type_name());
                 break;
             }
         }
     }
     // unwrap the nats client
     let nats_client = result.unwrap();
-
-    // configure actor mailbox
-    let name = mailbox_name(&opts.system_name, &opts.actor_name);
-    let mailbox = ActorMailbox::new(name, actor_mailbox_max_size, nats_client);
-
-    info!("{} agent running", &actor.name());
-    let mut agent = Agent::new(mailbox, actor);
+    info!("{} agent running", A::type_name());
+    let mut agent = Agent::new(system_name, actor, actor_mailbox_max_size, nats_client);
     agent.run().await
 }

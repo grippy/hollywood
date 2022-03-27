@@ -1,14 +1,14 @@
 [workspace]
 
 members = [
-    "examples/playground",
-    "examples/actor-x",
-    "examples/actor-y",
-    "examples/actor-z",
-    "examples/actor-zz",
+    "examples/bin/actor-x",
+    "examples/bin/actor-y",
+    "examples/bin/actor-z",
+    "examples/bin/actor-zz",
     "examples/test-client",
-    "examples/types",
+    "examples/system",
     "hollywood",
     "hollywood-cli",
     "hollywood-macro",
+    # "playground",
 ]

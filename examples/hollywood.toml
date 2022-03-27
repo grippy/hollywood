@@ -7,33 +7,33 @@ name = "ActorX"
 
 [actor.dev]
 bin = "actor-x"
-path = "actor-x"
+path = "bin/actor-x"
 env = ["RUST_LOG=info"]
-watch = ["types", "../hollywood"]
+watch = ["system", "../hollywood"]
 
 [[actor]]
 name = "ActorY"
 
 [actor.dev]
 bin = "actor-y"
-path = "actor-y"
-env = ["RUST_LOG=debug"]
-watch = ["types", "../hollywood"]
+path = "bin/actor-y"
+env = ["RUST_LOG=info"]
+watch = ["system", "../hollywood"]
 
 [[actor]]
 name = "ActorZ"
 
 [actor.dev]
 bin = "actor-z"
-path = "actor-z"
-env = ["RUST_LOG=debug"]
-watch = ["types", "../hollywood"]
+path = "bin/actor-z"
+env = ["RUST_LOG=info"]
+watch = ["system", "../hollywood"]
 
 [[actor]]
 name = "ActorZZ"
 
 [actor.dev]
 bin = "actor-zz"
-path = "actor-zz"
-env = ["RUST_LOG=debug"]
-watch = ["types", "../hollywood"]
+path = "bin/actor-zz"
+env = ["RUST_LOG=info"]
+watch = ["system", "../hollywood"]
