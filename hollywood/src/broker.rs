@@ -69,8 +69,7 @@ impl Broker {
         };
         let mut backoff = 0;
         loop {
-            // slow down how fast we read nats messages
-            // if mailbox is full
+            // slow down nats reading if mailbox is full
             loop {
                 if max_size > 0 && mailbox_sender.len() > max_size as usize {
                     sleep(Duration::from_millis(100)).await;

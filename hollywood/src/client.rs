@@ -195,7 +195,7 @@ pub mod mailbox {
             let mailbox_name = match A::subscribe_type() {
                 SubscribeType::Queue => {
                     // check to see if this msg_name/msg_version
-                    // is supported by this Actor.dispatch_types
+                    // is supported by this Actor::dispatch_types
                     let actor_type = format!("{}/{}", &actor_name, &actor_version);
                     let msg_type = format!("{}/{}", &msg_name, &msg_version);
                     debug!(
