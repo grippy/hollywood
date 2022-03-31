@@ -6,12 +6,7 @@ use log::{debug, info};
 use redis;
 use redis::AsyncCommands;
 
-///
-///
 /// ActorY
-///
-///
-
 #[derive(Hollywood)]
 #[dispatch(ActorYMsg)]
 pub struct ActorY {

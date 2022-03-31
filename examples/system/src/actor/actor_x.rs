@@ -1,19 +1,11 @@
 use crate::types::msg::{ActorXMsg, ActorYMsg};
 use crate::types::version::V1_0;
 use chrono::{DateTime, Utc};
-use hollywood::{
-    self, async_trait, Actor, Dispatch, DispatchResponse, DispatchType, Handle, Msg, Result,
-};
+use hollywood::prelude::actor::*;
 use hollywood_macro::Hollywood;
 use log::{debug, error, info};
 use std::time::SystemTime;
 use tokio::time::{sleep, Duration};
-
-///
-///
-/// ActorX
-///
-///
 
 fn now() -> String {
     let now = SystemTime::now();
@@ -21,8 +13,9 @@ fn now() -> String {
     now.to_rfc3339()
 }
 
+/// ActorX
 #[derive(Hollywood)]
-#[dispatch("ActorXMsg")]
+#[dispatch(ActorXMsg)]
 pub struct ActorX {
     actor_y: hollywood::mailbox::Mailbox,
 }
