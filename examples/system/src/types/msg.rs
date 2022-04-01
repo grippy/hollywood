@@ -1,12 +1,6 @@
+use crate::types::version;
 use hollywood::Msg;
 use serde::{Deserialize, Serialize};
-
-use crate::types::version;
-
-// // ActorZ
-// pub static ACTOR_Z: &'static str = "ActorZ";
-// // ActorZZ
-// pub static ACTOR_ZZ: &'static str = "ActorZZ";
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]

@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
     // set env vars to initialize mailbox using env variables
     // set HOLLYWOOD_SYSTEM=examples
     env::set_hollywood_system(system_name.clone());
+
     // set HOLLYWOOD_SYSTEM_EXAMPLES_NATS_URI=nats_uri
     env::set_hollywood_system_nats_uri(system_name.clone(), nats_uri.clone());
 

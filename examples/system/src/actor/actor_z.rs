@@ -18,7 +18,6 @@ impl ActorZ {
 
 impl Actor for ActorZ {
     const VERSION: &'static str = version::V1_0;
-
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Publish {
             subject: PUBSUB_SUBJECT_ONE,
@@ -46,7 +45,6 @@ impl Handle<SubjectOneMsg> for ActorZ {
                 info!("subscribe event actor-z: {:?}", &msg);
             }
         }
-
         Ok(())
     }
 }

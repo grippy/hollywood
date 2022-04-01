@@ -46,7 +46,6 @@ impl Handle<SubjectOneMsg> for ActorZZ {
                 info!("subscribe event actor-zz: {:?}", &msg);
             }
         }
-
         Ok(())
     }
 }

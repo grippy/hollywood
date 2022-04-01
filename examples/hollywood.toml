@@ -9,6 +9,7 @@ nats_uri = "nats://127.0.0.1:14222"
 [[actor]]
 name = "ActorX"
 
+# Define how to run an actor using hollywood-cli dev
 [actor.dev]
 bin = "actor-x"
 path = "bin/actor-x"

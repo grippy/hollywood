@@ -10,6 +10,15 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+fn cargo_watch_installed() -> bool {
+    let result = Command::new("cargo").args(["watch", "--version"]).output();
+    // if `cargo watch` is missing we should have a stderr on the output
+    match result {
+        Ok(output) => output.stderr.len() == 0,
+        Err(_) => false,
+    }
+}
+
 #[derive(StructOpt, Debug)]
 pub(crate) struct Opts {
     /// The name of the system to run
@@ -31,10 +40,17 @@ pub(crate) fn handle(opts: Opts) -> Result<(), Error> {
         return Err(Error::new(ErrorKind::InvalidInput, "missing --config"));
     }
 
+    // this requires cargo watch is installed...
+    if !cargo_watch_installed() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            "missing `cargo watch` command",
+        ));
+    }
+
     // Load the hollywood config...
     // build the config path from current dir...
     let dir = std::env::current_dir()?;
-
     let mut config_path = dir.clone();
     let config_file = opts.config.unwrap();
     config_path.push(&config_file);

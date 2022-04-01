@@ -2,7 +2,6 @@ use hollywood::{self, Result, RunOpts};
 use log::{info, warn};
 use pretty_env_logger;
 use redis;
-use system::actor::actor_y::ActorY;
 use tokio::time::{sleep, Duration};
 
 // init_redis_client returns an async redis connection
@@ -46,7 +45,7 @@ async fn main() -> Result<()> {
     pretty_env_logger::init();
     let redis_uri = "redis://127.0.0.1/";
     let redis_conn = init_redis_client(redis_uri).await.unwrap();
-    let actor = ActorY::new(redis_conn);
+    let actor = system::ActorY::new(redis_conn);
     let opts = RunOpts::from_env(actor)?.with_actor_mailbox_max_size(Some(5u32));
     hollywood::run(opts).await
 }

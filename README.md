@@ -8,10 +8,10 @@ Hollywood is an another Actor implementation written in Rust. Whereas most Rust 
     - handle `send` type messages that don't return a response
     - handle `request` type messages where the caller expects a response
     - handle `subscribe` type messages for message sent to pubsub topics
-- Hollywood defines a `Msg` trait that describes how to serialize/deserialize messages.
-- Hollywood Actors may define how to handle multiple message types. This could be useful for versioning messages. There's a macro that enables dispatching messages to correct Handle implementation.
+- Hollywood defines a `Msg` trait that describes how to serialize/deserialize messages. Actor messages must implement `serde::Serialize` and `serde::Deserialize`. Hollywood defaults to using `serde::json` but can be overridden the Msg trait implementation.
+- Hollywood Actors may define how to handle multiple message types. This could be useful for versioning messages. There's a macro that enables dispatching Actor messages by type.
 - Hollywood implementations may define a config file for running a "system" of actors.
-  The main use-case for this is configuring the dev environment for running and testing actor changes locally. But this could be expanded to aid build, testing, and deployments.
+  The main use-case is running all actors locally with one command and then watching them for changes. But this could be expanded to aid build, testing, and deployments.
 
 ## Small footprint
 
@@ -38,11 +38,11 @@ Here's how you run the examples. See the `examples` directory for code examples.
 
 1. `docker-compose up`: this should run 3 nats containers and redis (which isn't a hollywood dependency but used as an example).
 
-### Run the "System"
+### Run the "examples" System
 
 1. `cargo build --bin=hollywood-cli` to compile `hollywood-cli`
 2. cd `examples`
-3. `../target/debug/hollywood-cli dev --system=examples --config=hollywood.toml` (uses `cargo watch` to rebuild and run actors on code changes) or you can manually run each actor.
+3. `../target/debug/hollywood-cli dev --system=examples --config=hollywood.toml` (uses `cargo watch` to rebuild and re-run actors on code changes) or you can manually run each actor.
 
 ### Run the test-client
 
