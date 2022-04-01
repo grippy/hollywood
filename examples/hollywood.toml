@@ -1,7 +1,11 @@
+# Define multiple systems
+# by name and what nats uri they're
+# back by...
 [[system]]
 name = "examples"
 nats_uri = "nats://127.0.0.1:14222"
 
+# Define an actor by name
 [[actor]]
 name = "ActorX"
 

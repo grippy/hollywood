@@ -1,4 +1,4 @@
-use hollywood::{ActorMailbox, Result};
+use hollywood::{env, ActorMailbox, Result};
 use log::{error, info};
 use pretty_env_logger;
 
@@ -12,15 +12,21 @@ use tokio::time::{sleep, Duration};
 async fn main() -> Result<()> {
     pretty_env_logger::init();
 
-    // defaults
+    // system name and nats uri defaults
     let system_name: String = "examples".into();
     let nats_uri: String = "nats://127.0.0.1:14222".into();
 
+    // set env vars to initialize mailbox using env variables
+    // set HOLLYWOOD_SYSTEM=examples
+    env::set_hollywood_system(system_name.clone());
+    // set HOLLYWOOD_SYSTEM_EXAMPLES_NATS_URI=nats_uri
+    env::set_hollywood_system_nats_uri(system_name.clone(), nats_uri.clone());
+
     // ActorX client
-    let actor_x = ActorX::mailbox::<ActorXMsg>(system_name.clone(), nats_uri.clone()).await?;
+    let actor_x = ActorX::mailbox_from_env::<ActorXMsg>().await?;
 
     // ActorY client
-    let actor_y = ActorY::mailbox::<ActorYMsg>(system_name.clone(), nats_uri.clone()).await?;
+    let actor_y = ActorY::mailbox_from_env::<ActorYMsg>().await?;
 
     // Make a client from ActorZ that writes
     // pubsub messages...
@@ -90,5 +96,4 @@ async fn main() -> Result<()> {
 
         sleep(Duration::from_millis(3000)).await;
     }
-    // Ok(())
 }

@@ -136,7 +136,6 @@ impl Client {
         };
         let hollywood_msg = HollywoodMsg::Request(req);
         let msg = hollywood_msg.into_bytes()?;
-        // let subject = mailbox_name(&self.system_name, &actor_name.to_string());
         let timeout = std::time::Duration::from_secs(timeout_secs);
         debug!(
             "hollywood::request_timeout to actor:{} w/ msg: {:?}",
@@ -156,7 +155,6 @@ impl Client {
         };
         let hollywood_msg = HollywoodMsg::Request(req);
         let msg = hollywood_msg.into_bytes()?;
-        // let subject = mailbox_name(&self.system_name, &actor_name.to_string());
         debug!(
             "hollywood::request to actor:{} w/ msg: {:?}",
             &subject, &hollywood_msg
