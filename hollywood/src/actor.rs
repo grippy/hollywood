@@ -419,15 +419,12 @@ impl<A: Actor + Dispatch> Agent<A> {
         );
 
         let _ = broker.run().await?;
-
         // run the mailbox receiver...
-        // TODO: can we make a pool of these here?
         loop {
             if let Ok(mailbox_msg) = self.recv().await {
                 self.handle_mailbox_msg(mailbox_msg).await
             }
         }
-        // Ok(())
     }
 }
 
