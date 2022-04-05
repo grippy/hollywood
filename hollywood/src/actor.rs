@@ -14,16 +14,6 @@ use tokio::time::{sleep, Duration};
 #[allow(non_upper_case_globals)]
 pub const VERSION_v1_0: &'static str = "v1.0";
 
-/// Mailbox trait defines a common interface for
-/// for sending and receiving messages.
-#[async_trait]
-trait Mailbox {
-    type Msg;
-    fn name(&self) -> String;
-    fn sender(&self) -> async_channel::Sender<Self::Msg>;
-    async fn recv(&mut self) -> Result<Self::Msg>;
-}
-
 /// Returns the mailbox name for a given system and actor.
 /// This value is used as the Subject for reading/writing nats
 /// messages.

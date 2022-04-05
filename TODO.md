@@ -3,7 +3,7 @@
 - [ ] Test coverage is non-existent
 - [ ] Health checks
 - [ ] Shutdown hooks
-- [ ] hollywood-cli dev should check if `cargo watch` is installed
+- [x] hollywood-cli dev should check if `cargo watch` is installed
 - [x] Add Msg Id
 - [x] Run options:
     - [x] Max queue size
@@ -15,7 +15,17 @@
     - [x] Client::from_env
 - [x] Client request should define one type which
       is the same for input and output
-- [ ] Client api calls without using message type hints?
+- [ ] Mailbox that is specific for Actor version + Msg version
+      (so we don't have to pass type hints with mailbox calls).
+
+      mailbox::actor1_v1::msg1_v1_0::new(...)
+      mailbox::actor1_v1::msg1_v1_1::new(...)
+      mailbox::actor2_v1::msg2_v1_0::new(...)
+      mailbox::actor2_v1::msg2_v1_1::new(...)
+
+      Maybe we could add this to the Hollywood macro so it produces
+      a mod for the actor version and msg version.
+
 - [ ] Client calls should configure timeouts
   - [x] - hollywood client request_timeout
   - [ ] - nats client initialize: max number of attempts to retry
@@ -27,7 +37,7 @@
     - [x] Dispatch trait + macro
     - [x] rework Client and make Mailbox wrapper
 - [ ] Examples: redis client should support retries
-
+- [ ] Nats: support JetStream as a Queue?
 
 ### Maybe
 - [ ] Where does Docker fit in?
