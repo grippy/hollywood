@@ -2,7 +2,6 @@
 
 Hollywood is an another Actor implementation written in Rust. Whereas most Rust Actor frameworks define a system of actors within one parent process, Hollywood doesn't do that. Instead, an actor runs as a standalone process and all actor communication goes through NAT's.
 
-
 ## Alpha-only
 
 This is alpha-only at this point. So, if you want to try it, install it as a crate dependency from github.
@@ -18,9 +17,10 @@ hollywood-macro = { git = "https://github.com/grippy/hollywood", package = "holl
 ## High-level concepts:
 
 - Hollywood defines an `Actor` trait with the following functionality:
-    - handle `send` type messages that don't return a response
-    - handle `request` type messages where the caller expects a response
-    - handle `subscribe` type messages for message sent to pubsub topics
+
+  - handle `send` type messages that don't return a response
+  - handle `request` type messages where the caller expects a response
+  - handle `subscribe` type messages for message sent to pubsub topics
 
 - Hollywood defines a `Msg` trait that describes how to serialize/deserialize messages. Actor messages must implement `serde::Serialize` and `serde::Deserialize`. Hollywood defaults to using `serde::json` but can be overridden in the Msg trait implementation (see `into_bytes` and `from_bytes`).
 
@@ -33,14 +33,13 @@ hollywood-macro = { git = "https://github.com/grippy/hollywood", package = "holl
 
 Each actor should run as a standalone process. An actor uses the worker pattern to pull messages from a mailbox. Currently, a mailbox is just a NATs subject (queue or pubsub).
 
-
 ## Actor Mailbox
 
 Actor mailbox addresses (i.e. NATs subjects) follow this pattern:
 
 - `hollywood://{system_name}@{actor_name}/{actor_version}::{msg_type}/{msg_version}`
 
-Example for MyActor w/ MyMsg:
+Example for `MyActor` which handles `MyMsg`:
 
 - `hollywood://prod@MyActor/v1.0::MyMsg/v1.0`
 
