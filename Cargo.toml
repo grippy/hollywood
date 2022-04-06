@@ -1,0 +1,14 @@
+[workspace]
+
+members = [
+    "examples/bin/actor-x",
+    "examples/bin/actor-y",
+    "examples/bin/actor-z",
+    "examples/bin/actor-zz",
+    "examples/test-client",
+    "examples/system",
+    "hollywood",
+    "hollywood-cli",
+    "hollywood-macro",
+    # "playground",
+]

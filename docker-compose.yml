@@ -1,0 +1,30 @@
+version: "3.7"
+services:
+  nats1:
+    image: nats
+    ports:
+      - "14222:4222"
+      - "18222:8222"
+    # networks: ["nats"]
+  nats2:
+    image: nats
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://ruser:T0pS3cr3t@nats1:6222"
+    # networks: ["nats"]
+    depends_on: ["nats1"]
+  nats3:
+    image: nats
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://ruser:T0pS3cr3t@nats1:6222"
+    # networks: ["nats"]
+    depends_on: ["nats1"]
+  redis:
+    image: redis:6.2-alpine
+    restart: always
+    ports:
+      - '6379:6379'
+    command: redis-server --save 20 1 --loglevel warning
+    volumes:
+      - redis:/data
+
+volumes:
+  redis:
+    driver: local
