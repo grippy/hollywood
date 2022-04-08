@@ -1,7 +1,7 @@
 use clap::StructOpt;
 use hollywood::config::{Actor, System};
 use hollywood::env::{format_hollywood_system, format_hollywood_system_nats_uri};
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::ops::Index;
@@ -26,18 +26,20 @@ pub(crate) struct Opts {
     system: String,
 
     /// Sets a custom config file
-    #[clap(short, long, parse(from_os_str), value_name = "FILE")]
-    config: Option<PathBuf>,
+    #[clap(
+        short,
+        long,
+        parse(from_os_str),
+        value_name = "FILE",
+        default_value = "hollywood.toml"
+    )]
+    config: PathBuf,
 }
 
 pub(crate) fn handle(opts: Opts) -> Result<(), Error> {
     // validate options...
     if opts.system == "" {
         return Err(Error::new(ErrorKind::InvalidInput, "missing --system"));
-    }
-
-    if opts.config.is_none() {
-        return Err(Error::new(ErrorKind::InvalidInput, "missing --config"));
     }
 
     // this requires cargo watch is installed...
@@ -52,12 +54,10 @@ pub(crate) fn handle(opts: Opts) -> Result<(), Error> {
     // build the config path from current dir...
     let dir = std::env::current_dir()?;
     let mut config_path = dir.clone();
-    let config_file = opts.config.unwrap();
-    config_path.push(&config_file);
-
+    config_path.push(&opts.config);
     info!("load hollywood config from path {:?}", &config_path);
     let cfg = hollywood::config::Config::load(&config_path)?;
-    info!("loaded hollywood config: {:#?}", &cfg);
+    debug!("loaded hollywood config: {:#?}", &cfg);
 
     let index = &cfg.system.iter().position(|sys| &sys.name == &opts.system);
     if index.is_none() {
