@@ -30,6 +30,13 @@ Things to work on...
     - [ ] unit, integration tests, etc.
     - [ ] Docker/Docker-compose test environment
 
+- [ ] Broker should have shutdown hooks
+    - [ ] Broker inbox should read hollywood system messages
+          and respond to shutdown/health, etc.
+    - [ ] signal hooks?
+- [ ] `hollywood-cli test` which launches the compiled actors
+       using one process per actor
+
 ## Beyond
 
 - [ ] Health checks

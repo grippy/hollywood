@@ -1,6 +1,10 @@
 # Define multiple systems
 # by name and what nats uri they're
 # back by...
+
+target_dir = "../"
+
+
 [[system]]
 name = "examples"
 nats_uri = "nats://127.0.0.1:14222"
@@ -15,6 +19,11 @@ bin = "actor-x"
 path = "bin/actor-x"
 env = ["RUST_LOG=info"]
 watch = ["system", "../hollywood"]
+
+# [actor.test]
+# bin = "actor-x"
+# path = "../target/debug/actor-x"
+# env = ["RUST_LOG=info"]
 
 [[actor]]
 name = "ActorY"

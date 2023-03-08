@@ -27,6 +27,10 @@ pub(crate) fn epoch_as_secs() -> i64 {
     now_as_duration().as_secs() as i64
 }
 
+pub(crate) fn epoch_as_millis() -> u128 {
+    now_as_duration().as_millis()
+}
+
 #[allow(dead_code)]
 pub(crate) fn local_ip_addr() -> Result<String> {
     match local_ip() {

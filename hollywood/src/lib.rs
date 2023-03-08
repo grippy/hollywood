@@ -19,9 +19,14 @@ pub mod prelude {
     }
 }
 
+pub use broker::Broker;
+
+pub use client::mailbox::Mailbox;
 /// Hollywood Client. Use this if you need to
 /// implement actor-to-actor communication.
 pub use client::{mailbox, Client};
+
+pub mod system;
 
 // Hollywood Config related things...
 pub mod config;

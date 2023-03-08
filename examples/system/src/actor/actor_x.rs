@@ -2,6 +2,7 @@ use crate::types::msg::{ActorXMsg, ActorYMsg};
 use crate::types::version::V1_0;
 use chrono::{DateTime, Utc};
 use hollywood::prelude::actor::*;
+use hollywood::Mailbox;
 use hollywood_macro::Hollywood;
 use log::{debug, error, info};
 use std::time::SystemTime;
@@ -17,11 +18,11 @@ fn now() -> String {
 #[derive(Hollywood)]
 #[dispatch(ActorXMsg)]
 pub struct ActorX {
-    actor_y: hollywood::mailbox::Mailbox,
+    actor_y: Mailbox,
 }
 
 impl ActorX {
-    pub fn new(actor_y: hollywood::mailbox::Mailbox) -> Self {
+    pub fn new(actor_y: Mailbox) -> Self {
         Self { actor_y }
     }
 }
