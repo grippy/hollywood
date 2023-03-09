@@ -1,10 +1,10 @@
 # Hollywood
 
-Hollywood is an another Actor implementation written in Rust. Whereas most Rust Actor frameworks define a system of actors within one parent process, Hollywood doesn't do that. Instead, an actor runs as a standalone process and all actor communication goes through NAT's.
+Hollywood is an another Actor implementation written in Rust. Whereas most Rust Actor frameworks define a system of actors within parent/child processes, Hollywood doesn't do that. Instead, an actor runs as a standalone process and all actor communication goes through NAT's.
 
 ## Alpha-only
 
-This is alpha-only at this point. So, if you want to try it, install it as a crate dependency from github.
+This is extremely-alpha-only at this point. So, if you want to try it, install it as a crate dependency from github.
 
 In your `Cargo.toml`:
 
@@ -20,7 +20,7 @@ hollywood-macro = { git = "https://github.com/grippy/hollywood", package = "holl
 
   - handle `send` type messages that don't return a response
   - handle `request` type messages where the caller expects a response
-  - handle `subscribe` type messages for message sent to pubsub topics
+  - handle `subscribe` type messages sent over NAT's pubsub topics
 
 - Hollywood defines a `Msg` trait that describes how to serialize/deserialize messages. Actor messages must implement `serde::Serialize` and `serde::Deserialize`. Hollywood defaults to using `serde::json` but can be overridden in the Msg trait implementation (see `into_bytes` and `from_bytes`).
 
@@ -31,7 +31,7 @@ hollywood-macro = { git = "https://github.com/grippy/hollywood", package = "holl
 
 # Actors, Mailboxes, and Messages
 
-Each actor should run as a standalone process. An actor uses the worker pattern to pull messages from a mailbox. Currently, a mailbox is just a NATs subject (queue or pubsub).
+Each actor should run as a standalone process. An actor has Broker which pulls messages from its mailbox. Currently, a mailbox is just a NATs subject (queue or pubsub).
 
 ## Actor Mailbox
 
@@ -39,7 +39,7 @@ Actor mailbox addresses (i.e. NATs subjects) follow this pattern:
 
 - `hollywood://{system_name}@{actor_name}/{actor_version}::{msg_type}/{msg_version}`
 
-Example for `MyActor` which handles `MyMsg`:
+Example for `MyActor` which handles `MyMsg v1.0`:
 
 - `hollywood://prod@MyActor/v1.0::MyMsg/v1.0`
 
@@ -47,11 +47,11 @@ Example for `MyActor` which handles `MyMsg`:
 
 All actor messages are encoded as `HollywoodMsg` enums. From here, we define the type: `Send`, `Request` or `Publish` (if sending a pubsub message to a topic).
 
-Within each type, contains the inner message consumed by an Actor. An actor should define how-to handle each HollywoodMsg variant for all inner message types.
+Within each type, contains the inner message consumed by an Actor. An actor should define how-to handle each HollywoodMsg variant for all inner message types and how to serialize/deserialize its own messages. By default, `HollywoodMsg` are passed using JSON (but this could change).
 
 ## Small footprint
 
-Hollywood is ~1.3K lines of code.
+Hollywood is ~1.3K lines of code. This could change once we added a proper System test harness but for now this is a pretty small footprint.
 
 ```
 --------------------------------------------------------------------------------
