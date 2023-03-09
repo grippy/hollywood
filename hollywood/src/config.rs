@@ -6,7 +6,7 @@ use std::io::{Error, ErrorKind};
 // This file describes how to parse
 // hollywood.toml files.
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct Config {
     // A list of system names and some configuration
     // values for each one.
@@ -32,7 +32,7 @@ impl Config {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct System {
     // the name of the system
     pub name: String,
@@ -40,15 +40,17 @@ pub struct System {
     pub nats_uri: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Actor {
     // The name of the actor
     pub name: String,
     // The dev configuration
     pub dev: Option<ActorDev>,
+    // The test configuration
+    pub test: Option<ActorTest>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ActorDev {
     // the path to the actor crate
     pub path: String,
@@ -60,39 +62,10 @@ pub struct ActorDev {
     pub watch: Vec<String>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parser() {
-        let toml = r#"
-[[system]]
-name = "system1"
-nats_uri = "nats://system1"
-
-[[system]]
-name = "system2"
-nats_uri = "nats://system2"
-
-[[actor]]
-name = "Actor1"
-
-[actor.dev]
-bin = "actor-1"
-path = "examples/actor-1"
-env = ["ENV1=env1"]
-watch = ["dep1", "dep2"]
-
-[[actor]]
-name = "Actor2"
-
-[actor.dev]
-bin = "actor-2"
-path = "examples/actor-2"
-env = ["ENV2=env2"]
-watch = ["dep2", "dep3"]"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        println!("config: {:#?}", &config);
-    }
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ActorTest {
+    // the name of the actor binary
+    pub bin: String,
+    // a list of env variables to set before calling cargo run
+    pub env: Vec<String>,
 }

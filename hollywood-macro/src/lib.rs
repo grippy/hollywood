@@ -116,6 +116,7 @@ fn impl_hollywood_dispatch(
 			dispatch_type: &DispatchType,
 			bytes: &Vec<u8>,
 		) -> Result<DispatchResponse> {
+			use log::debug;
 			debug!("[DISPATCH] type: {:?}, version: {:?}, len: {}", &dispatch_type, &version, &bytes.len());
 			match &version[..] {
 				#(#version_arms)*

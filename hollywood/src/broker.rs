@@ -1,13 +1,15 @@
 use crate::actor::{
     ActorMsg, ActorRequest, ActorSend, ActorSender, ActorSubscribe, HollywoodMsg, SubscribeType,
 };
+use crate::common::epoch_as_millis;
+use crate::system::{SystemComponent, SystemInbox, SystemMsg, SystemSender};
 use anyhow::Result;
 use log::{error, info, warn};
 use nats::asynk::Connection;
 use tokio::time::{sleep, Duration};
 
-pub(crate) struct Broker {
-    actor_name: String,
+pub struct Broker {
+    system_inbox: SystemInbox,
     mailbox_names: Vec<String>,
     mailbox_sender: ActorSender,
     mailbox_max_size: Option<u32>,
@@ -16,8 +18,8 @@ pub(crate) struct Broker {
 }
 
 impl Broker {
-    pub(crate) fn new(
-        actor_name: String,
+    pub fn new(
+        system_inbox: SystemInbox,
         mailbox_names: Vec<String>,
         mailbox_sender: ActorSender,
         mailbox_max_size: Option<u32>,
@@ -25,7 +27,7 @@ impl Broker {
         subscribe_type: SubscribeType,
     ) -> Self {
         Self {
-            actor_name: actor_name,
+            system_inbox: system_inbox,
             mailbox_names: mailbox_names,
             mailbox_sender: mailbox_sender,
             mailbox_max_size: mailbox_max_size,
@@ -34,34 +36,46 @@ impl Broker {
         }
     }
 
+    pub fn system_inbox(&self) -> SystemSender {
+        self.system_inbox.0.clone()
+    }
+
+    /// Spawns a broker thread that reads messages
+    /// for a given actor+version msg type+version.
     async fn spawn(
         actor_name: String,
+        system_inbox: SystemInbox,
         mailbox_max_size: Option<u32>,
         mailbox_name: String,
         mailbox_sender: ActorSender,
         nats: Connection,
         subscribe_type: SubscribeType,
     ) -> Result<()> {
-        let source = match subscribe_type {
+        let nats_subject = match subscribe_type {
+            SubscribeType::Queue => mailbox_name,
+            SubscribeType::Publish { subject } => subject.to_owned(),
+        };
+        let nats_broker = match subscribe_type {
             SubscribeType::Queue => {
                 info!(
-                    "{} agent subscribing to queue subject {:?}",
-                    &actor_name, &mailbox_name
+                    "{} agent broker subscribing to queue subject {:?}",
+                    &actor_name, &nats_subject
                 );
                 nats
-                    // use the mailbox name as the group
-                    .queue_subscribe(&mailbox_name, &mailbox_name)
+                    // use the mailbox name as the group name
+                    .queue_subscribe(&nats_subject, &nats_subject)
                     .await?
             }
             SubscribeType::Publish { subject } => {
                 info!(
-                    "{} agent subscribing to pubsub subject {:?}",
-                    &actor_name, &subject
+                    "{} agent broker subscribing to pubsub subject {:?}",
+                    &actor_name, &nats_subject
                 );
                 nats.subscribe(&subject).await?
             }
         };
 
+        let system_inbox_recv = system_inbox.1;
         let max_size = if mailbox_max_size.is_some() {
             mailbox_max_size.unwrap()
         } else {
@@ -78,60 +92,87 @@ impl Broker {
                 }
             }
 
-            if let Some(nats_msg) = source.try_next() {
+            // read inbox messages...
+            if let Ok(sys_msg) = system_inbox_recv.try_recv() {
+                match sys_msg {
+                    SystemMsg::Health(reply) => {
+                        // should send OK back?
+                        let _ = reply
+                            .send(SystemMsg::Heartbeat(
+                                SystemComponent::Broker,
+                                epoch_as_millis(),
+                            ))
+                            .await;
+                    }
+                    SystemMsg::Shutdown => {
+                        // the broker can stop consuming messages
+                        // now...
+                        info!(
+                            "{} agent broker shutting down... stopping reads for subject {:?}",
+                            &actor_name, &nats_subject
+                        );
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(nats_msg) = nats_broker.try_next() {
                 // deserialize nats_msg.data here
                 let hollywood_msg: HollywoodMsg = match serde_json::from_slice(&nats_msg.data) {
                     Ok(msg) => msg,
                     Err(err) => {
-                        error!("deserializing nats msg to HollywoodMsg: {:?}", &err);
+                        error!("broker deserializing nats msg to HollywoodMsg: {:?}", &err);
                         continue;
                     }
                 };
 
-                // We should only have request/send here
-                // HollywoodMsg::Response type is only
-                let (msg_id, msg_version, msg) = match hollywood_msg {
-                    HollywoodMsg::Request(resp) => (resp.id, resp.msg_version, resp.msg),
-                    HollywoodMsg::Send(send) => (send.id, send.msg_version, send.msg),
-                    HollywoodMsg::Publish(publish) => {
-                        (publish.id, publish.msg_version, publish.msg)
+                // convert hollywood_msg => actor_msg
+                let actor_msg = match hollywood_msg {
+                    HollywoodMsg::Request(req) => {
+                        // HollywoodMsg::Request should always
+                        // have a reply handle...
+                        // but since this field is optional,
+                        // convert this to a "Send" if it's missing
+                        if nats_msg.reply.is_some() {
+                            ActorMsg::Request(ActorRequest {
+                                id: req.id,
+                                msg: req.msg,
+                                msg_version: req.msg_version,
+                                reply_id: nats_msg.reply.unwrap(),
+                            })
+                        } else {
+                            warn!(
+                                "broker received HollywoodMsg::Request w/ missing reply handle, convert msg to ActorMsg::Send {:?}",
+                                &req
+                            );
+                            ActorMsg::Send(ActorSend {
+                                id: req.id,
+                                msg: req.msg,
+                                msg_version: req.msg_version,
+                            })
+                        }
                     }
+                    HollywoodMsg::Send(send) => ActorMsg::Send(ActorSend {
+                        id: send.id,
+                        msg: send.msg,
+                        msg_version: send.msg_version,
+                    }),
+                    HollywoodMsg::Publish(publish) => ActorMsg::Subscribe(ActorSubscribe {
+                        id: publish.id,
+                        msg: publish.msg,
+                        msg_version: publish.msg_version,
+                    }),
                     _ => {
-                        todo!("HollywoodMsg: not yet implemented");
-                    }
-                };
-
-                // create ActorMsg.. if nats msg
-                // has a reply handle then send a nats request
-                // so we can route the response back to the caller
-                let msg = if nats_msg.reply.is_some() {
-                    ActorMsg::Request(ActorRequest {
-                        id: msg_id,
-                        msg: msg,
-                        msg_version: msg_version,
-                        reply_id: nats_msg.reply.unwrap(),
-                    })
-                } else {
-                    // send-type: queue or pubsub?
-                    match subscribe_type {
-                        SubscribeType::Queue => ActorMsg::Send(ActorSend {
-                            id: msg_id,
-                            msg: msg,
-                            msg_version: msg_version,
-                        }),
-                        _ => ActorMsg::Subscribe(ActorSubscribe {
-                            id: msg_id,
-                            msg: msg,
-                            msg_version: msg_version,
-                        }),
+                        todo!("broker HollywoodMsg missing match arm");
                     }
                 };
 
                 // send to mailbox
-                match mailbox_sender.send(msg).await {
+                match mailbox_sender.send(actor_msg).await {
                     Ok(_) => {}
                     Err(err) => {
-                        warn!("failed to forward msg to actor mailbox: {:?}", &err);
+                        warn!("broker failed to forward msg to actor mailbox: {:?}", &err);
                     }
                 }
                 backoff = 0;
@@ -144,13 +185,13 @@ impl Broker {
                 sleep(Duration::from_millis(backoff)).await;
             }
         }
-        // Ok(())
+        Ok(())
     }
 
-    pub(crate) async fn run(&self) -> Result<()> {
-        // spawn broker for each mailbox
+    pub async fn run(&self, actor_name: String) -> Result<()> {
         for mailbox_name in &self.mailbox_names {
-            let actor_name = self.actor_name.clone();
+            let system_inbox = self.system_inbox.clone();
+            let this_actor_name = actor_name.clone();
             let nats = self.nats.clone();
             let mailbox_name = mailbox_name.to_owned();
             let mailbox_sender = self.mailbox_sender.clone();
@@ -158,7 +199,8 @@ impl Broker {
             let subscribe_type = self.subscribe_type.clone();
             tokio::spawn(async move {
                 Broker::spawn(
-                    actor_name,
+                    this_actor_name,
+                    system_inbox,
                     mailbox_max_size,
                     mailbox_name,
                     mailbox_sender,
@@ -168,6 +210,7 @@ impl Broker {
                 .await
             });
         }
+
         Ok(())
     }
 }

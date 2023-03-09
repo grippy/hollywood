@@ -10,5 +10,6 @@ members = [
     "hollywood",
     "hollywood-cli",
     "hollywood-macro",
+    "hollywood-test",
     # "playground",
 ]

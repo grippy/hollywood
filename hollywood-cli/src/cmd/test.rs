@@ -10,14 +10,14 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-fn cargo_watch_installed() -> bool {
-    let result = Command::new("cargo").args(["watch", "--version"]).output();
-    // if `cargo watch` is missing we should have a stderr on the output
-    match result {
-        Ok(output) => output.stderr.len() == 0,
-        Err(_) => false,
-    }
-}
+// fn cargo_watch_installed() -> bool {
+//     let result = Command::new("cargo").args(["watch", "--version"]).output();
+//     // if `cargo watch` is missing we should have a stderr on the output
+//     match result {
+//         Ok(output) => output.stderr.len() == 0,
+//         Err(_) => false,
+//     }
+// }
 
 #[derive(StructOpt, Debug)]
 pub(crate) struct Opts {
@@ -40,14 +40,6 @@ pub(crate) fn handle(opts: Opts) -> Result<(), Error> {
     // validate options...
     if opts.system == "" {
         return Err(Error::new(ErrorKind::InvalidInput, "missing --system"));
-    }
-
-    // this requires cargo watch is installed...
-    if !cargo_watch_installed() {
-        return Err(Error::new(
-            ErrorKind::NotFound,
-            "missing `cargo watch` command",
-        ));
     }
 
     // Load the hollywood config...
@@ -85,23 +77,17 @@ pub(crate) fn handle(opts: Opts) -> Result<(), Error> {
 
 fn validate_actors(actors: &Vec<hollywood::config::Actor>) -> Result<(), Error> {
     for actor in actors {
-        if actor.dev.is_none() {
+        if actor.test.is_none() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "hollywood.toml [actor.dev] init",
+                "hollywood.toml [actor.test] init",
             ));
         }
-        let dev = &actor.dev.as_ref().unwrap();
-        if dev.path == "" {
+        let test = &actor.test.as_ref().unwrap();
+        if test.bin == "" {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "hollywood.toml [actor.dev.path] is empty",
-            ));
-        }
-        if dev.bin == "" {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "hollywood.toml [actor.dev.bin] is empty",
+                "hollywood.toml [actor.test.bin] is empty",
             ));
         }
     }
@@ -120,25 +106,18 @@ impl Runtime {
     }
 
     //fn run_actor(&mut self, actor: &Actor) {
-    fn spawn(dir: PathBuf, system: System, actor: Actor) {
-        // The watch command looks something like this...
-        // `RUST_LOG=info cargo watch -w examples/types -x 'run --bin=actor-x'`
-
+    fn spawn(_dir: PathBuf, system: System, actor: Actor) {
+        // The command this generates looks something like this...
+        // 1. cargo build
+        // 2. `RUST_LOG=info cargo run --bin=actor-x`
         info!("spawn {:?} for system: {:?}", &actor, &system);
 
-        // TODO: Load actor Cargo.toml so we can get the package name?
-
-        // get dev
-        let dev = actor.dev.unwrap();
-
-        fn prefix_watch_path(mut prefix: PathBuf, suffix: String) -> PathBuf {
-            prefix.push(suffix);
-            prefix
-        }
+        // get test
+        let test = actor.dev.unwrap();
 
         // init env vars
         let mut env: HashMap<&str, &str> = HashMap::new();
-        for e in &dev.env {
+        for e in &test.env {
             let mut parts = e.split("=");
             let key = parts.next();
             let val = parts.next();
@@ -148,6 +127,7 @@ impl Runtime {
             }
             env.insert(&key.unwrap(), val.unwrap());
         }
+
         // add HOLLYWOOD env vars here
         let hollywood_system_env = format_hollywood_system();
         let hollywood_system_nats_uri_env = format_hollywood_system_nats_uri(system.name.clone());
@@ -156,31 +136,14 @@ impl Runtime {
 
         // init args
         let mut args = Vec::new();
-        args.push("watch".to_owned());
-
-        // watch args
-        args.push("-w".to_owned());
-        let fd = prefix_watch_path(dir.clone(), dev.path);
-        if let Some(path) = fd.to_str() {
-            args.push(path.to_owned());
-        }
-
-        for w in dev.watch {
-            args.push("-w".to_owned());
-            let fd = prefix_watch_path(dir.clone(), w);
-            if let Some(path) = fd.to_str() {
-                args.push(path.to_owned());
-            }
-        }
 
         // delay
-        args.push("-d".to_owned());
-        args.push("1".to_owned());
+        // args.push("-d".to_owned());
+        // args.push("1".to_owned());
 
         // run args
-        let exec = format!("run --bin {}", &dev.bin);
-        args.push("-x".to_owned());
-        args.push(exec);
+        let run = format!("run --bin {}", &test.bin);
+        args.push(run);
 
         info!(
             "spawn {} cmd env: {:?} and args: {:?}",

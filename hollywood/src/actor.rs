@@ -2,8 +2,9 @@ use crate::broker::Broker;
 use crate::client;
 use crate::common;
 use crate::env::{hollywood_system, hollywood_system_nats_uri};
+use crate::system::{SystemComponent, SystemInbox, SystemMsg};
 use anyhow::Result;
-use async_channel;
+use async_channel::{self, TryRecvError};
 use async_trait::async_trait;
 use log::{error, info, warn};
 use nats::asynk::Connection;
@@ -17,14 +18,14 @@ pub const VERSION_v1_0: &'static str = "v1.0";
 /// Returns the mailbox name for a given system and actor.
 /// This value is used as the Subject for reading/writing nats
 /// messages.
-pub(crate) fn mailbox_name(system_name: &String, actor_name: &String) -> String {
+pub fn mailbox_name(system_name: &String, actor_name: &String) -> String {
     format!("hollywood://{}@{}", system_name, actor_name)
 }
 
 /// Message type for sending nats requests
 /// that expect a reply.
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct HollywoodRequest {
+pub struct HollywoodRequest {
     pub id: String,
     pub msg: Vec<u8>,
     pub msg_version: String,
@@ -32,7 +33,7 @@ pub(crate) struct HollywoodRequest {
 
 /// Message type for returning an Actor response.
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct HollywoodResponse {
+pub struct HollywoodResponse {
     pub error: Option<String>,
     pub id: String,
     pub msg: Option<Vec<u8>>,
@@ -42,7 +43,7 @@ pub(crate) struct HollywoodResponse {
 /// Message type that sends a nats message
 /// without expecting a reply.
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct HollywoodSend {
+pub struct HollywoodSend {
     pub id: String,
     pub msg: Vec<u8>,
     pub msg_version: String,
@@ -50,7 +51,7 @@ pub(crate) struct HollywoodSend {
 
 /// Message type that delivers a pubsub message
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct HollywoodPublish {
+pub struct HollywoodPublish {
     pub id: String,
     pub msg: Vec<u8>,
     pub msg_version: String,
@@ -60,7 +61,7 @@ pub(crate) struct HollywoodPublish {
 /// flowing through the system.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
-pub(crate) enum HollywoodMsg {
+pub enum HollywoodMsg {
     Request(HollywoodRequest),
     Response(HollywoodResponse),
     Send(HollywoodSend),
@@ -77,26 +78,26 @@ impl Msg for HollywoodMsg {
 // Request(HollywoodRequest, reply_id: String)
 // Send(HollywoodSend)
 // etc...
-pub(crate) struct ActorRequest {
+pub struct ActorRequest {
     pub id: String,
     pub msg_version: String,
     pub msg: Vec<u8>,
     pub reply_id: String,
 }
 
-pub(crate) struct ActorSend {
+pub struct ActorSend {
     pub id: String,
     pub msg_version: String,
     pub msg: Vec<u8>,
 }
 
-pub(crate) struct ActorSubscribe {
+pub struct ActorSubscribe {
     pub id: String,
     pub msg_version: String,
     pub msg: Vec<u8>,
 }
 
-pub(crate) enum ActorMsg {
+pub enum ActorMsg {
     Request(ActorRequest),
     Send(ActorSend),
     Subscribe(ActorSubscribe),
@@ -106,8 +107,8 @@ pub(crate) enum ActorMsg {
     Shutdown,
 }
 
-pub(crate) type ActorSender = async_channel::Sender<ActorMsg>;
-pub(crate) type ActorReceiver = async_channel::Receiver<ActorMsg>;
+pub type ActorSender = async_channel::Sender<ActorMsg>;
+pub type ActorReceiver = async_channel::Receiver<ActorMsg>;
 
 #[derive(Clone)]
 pub enum SubscribeType {
@@ -164,6 +165,9 @@ pub enum DispatchType {
 // DispatchResponse: (message version, message)
 pub type DispatchResponse = (Option<&'static str>, Option<Vec<u8>>);
 
+/// Dispatch trait is automatically generated when
+/// an actor struct configures the hollywood macro
+/// using #[dispatch(MsgType1, MsgType2)]
 #[async_trait]
 pub trait Dispatch {
     // This is used to configure which actor mailbox
@@ -180,6 +184,8 @@ pub trait Dispatch {
     ) -> Result<DispatchResponse>;
 }
 
+/// ActorMailbox is automatically implement
+/// when an actor configures the hollywood macro
 #[async_trait]
 pub trait ActorMailbox
 where
@@ -227,6 +233,10 @@ pub trait Actor {
     }
 }
 
+/// Actors should implement the Handle trait
+/// and provide implementations for `send`, `request`, and `subscribe`.
+/// We can't provide default implementations otherwise, the compiler will
+/// complain the "future created by async block is not `Send`"
 #[async_trait]
 pub trait Handle<M>
 where
@@ -240,8 +250,7 @@ where
 }
 
 /// Agent is responsible for dispatching
-/// messages to an actor instance that
-/// are read from a Broker
+/// messages read from a broker to an actor
 struct Agent<A: Actor + Dispatch> {
     system_name: String,
     actor: A,
@@ -264,15 +273,23 @@ impl<A: Actor + Dispatch> Agent<A> {
         }
     }
 
+    // Clone sender channel
     fn sender(&self) -> ActorSender {
         self.sender.clone()
     }
 
+    // Read the receiver channel
+    #[allow(dead_code)]
     async fn recv(&mut self) -> Result<ActorMsg> {
         match self.receiver.recv().await {
             Ok(msg) => Ok(msg),
             Err(err) => Err(err.into()),
         }
+    }
+
+    // Try reading the receiver channel
+    fn try_recv(&mut self) -> Result<ActorMsg, TryRecvError> {
+        self.receiver.try_recv()
     }
 
     /// Publish the response to an actor request
@@ -290,6 +307,7 @@ impl<A: Actor + Dispatch> Agent<A> {
         }
     }
 
+    /// Handle ActorMsg messages
     async fn handle_mailbox_msg(&mut self, mailbox_msg: ActorMsg) {
         match mailbox_msg {
             ActorMsg::Health => {
@@ -375,6 +393,24 @@ impl<A: Actor + Dispatch> Agent<A> {
         }
     }
 
+    async fn spawn_system_heatlh_checker(&self, _actor_name: String, system_inbox: SystemInbox) {
+        tokio::spawn(async move {
+            let (tx, rx) = async_channel::bounded(10);
+            loop {
+                // how many responses should we read here?
+                let _ = system_inbox.0.send(SystemMsg::Health(tx.clone())).await;
+                loop {
+                    if let Ok(system_msg) = rx.recv().await {
+                        println!("system_msg: {:?}", &system_msg);
+                    } else {
+                        sleep(Duration::from_secs(3)).await;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     /// Run implements a basic runtime for running an
     /// agent (broker and actor mailbox consumer) for given
     /// system and actor instance.
@@ -398,9 +434,12 @@ impl<A: Actor + Dispatch> Agent<A> {
             })
             .collect::<Vec<_>>();
 
+        let (tx, rx) = async_channel::unbounded();
+        let system_inbox: SystemInbox = (tx, rx);
+
         // run broker...
         let broker = Broker::new(
-            actor_type_name_version.to_owned(),
+            system_inbox.clone(),
             mailbox_names,
             mailbox_sender,
             mailbox_max_size,
@@ -408,13 +447,55 @@ impl<A: Actor + Dispatch> Agent<A> {
             subscribe_type,
         );
 
-        let _ = broker.run().await?;
+        // actor name
+        let actor_name = actor_type_name_version.clone();
+
+        // run the broker
+        let _ = broker.run(actor_name.clone()).await?;
+
+        // spawn system health check
+        self.spawn_system_heatlh_checker(actor_name.clone(), system_inbox.clone())
+            .await;
+
         // run the mailbox receiver...
+        let mut should_shutdown = false;
+        let system_inbox_recv = system_inbox.1;
         loop {
-            if let Ok(mailbox_msg) = self.recv().await {
+            // handle actor messages
+            if let Ok(mailbox_msg) = self.try_recv() {
                 self.handle_mailbox_msg(mailbox_msg).await
+            } else {
+                // the mailbox is empty or we had an error
+                // trying to recv...
+                // were we asked to shutdown?
+                if should_shutdown {
+                    break;
+                }
+            }
+
+            // handle system inbox messages
+            if let Ok(sys_msg) = system_inbox_recv.try_recv() {
+                match sys_msg {
+                    SystemMsg::Health(reply) => {
+                        let _ = reply
+                            .send(SystemMsg::Heartbeat(
+                                SystemComponent::Agent,
+                                common::epoch_as_millis(),
+                            ))
+                            .await;
+                    }
+                    SystemMsg::Shutdown => {
+                        // the broker can stop consuming messages
+                        // now...
+                        info!("{} agent shutting down...", &actor_name);
+                        should_shutdown = true;
+                    }
+                    _ => {}
+                }
             }
         }
+
+        Ok(())
     }
 }
 
